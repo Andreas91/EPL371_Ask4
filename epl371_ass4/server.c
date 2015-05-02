@@ -33,6 +33,7 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in server, client;
 	struct sockaddr *serverptr, *clientptr;
 	struct hostent *rem;
+	char buf[256];
 
 	// Set and print server's config
 	setConfig();
@@ -85,14 +86,26 @@ int main(int argc, char *argv[]) {
 
 		// Create child for serving the client
 		switch (fork()) {
-			case -1 : {perror("fork"); exit(1);}
-			case 0 : {
+			case -1: {
+				perror("fork");
+				exit(1);
+			}
+			case 0: {
+				bzero(buf, sizeof buf); // Initialize buffer
+				
+				// Receive msg
+				if (read(newsock, buf, sizeof buf) < 0) {
+					perror("read");
+					exit(1);
+				}
+				printf("Read string: %s\n", buf);
+				
 				
 			}
 		}
 
 		// Close Socket
-		close(newsock); /* Close socket */
+		close(newsock);
 		printf("Connection from %s is closed\n", rem->h_name);
 		exit(0);
 	}
@@ -106,8 +119,8 @@ int main(int argc, char *argv[]) {
  */
 void setConfig() {
 	FILE *file = fopen(FCONFIG, "r");
-	
-	if (file == NULL){
+
+	if (file == NULL) {
 		printf("*** Unable to configure server! System will now exit. ***\n");
 		exit(0);
 	}
