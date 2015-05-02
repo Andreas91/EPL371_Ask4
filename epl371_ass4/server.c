@@ -22,9 +22,12 @@ struct config {
 // Functions Prototypes
 void setConfig();
 void printConfig();
+void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML);
+void mySend(int sock, char *HTML);
 
 // Global Variables
 struct config conf;
+//char *reqMethod;
 
 int main(int argc, char *argv[]) {
 
@@ -33,7 +36,7 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in server, client;
 	struct sockaddr *serverptr, *clientptr;
 	struct hostent *rem;
-	char buf[256];
+	char buf[512];
 
 	// Set and print server's config
 	setConfig();
@@ -86,21 +89,29 @@ int main(int argc, char *argv[]) {
 
 		// Create child for serving the client
 		switch (fork()) {
-			case -1: {
-				perror("fork");
-				exit(1);
-			}
+		case -1: {
+			perror("fork");
+			exit(1);
+		}
 			case 0: {
-				bzero(buf, sizeof buf); // Initialize buffer
-				
-				// Receive msg
-				if (read(newsock, buf, sizeof buf) < 0) {
-					perror("read");
-					exit(1);
-				}
-				printf("Read string: %s\n", buf);
-				
-				
+				do {
+					bzero(buf, sizeof buf); // Initialize buffer
+	
+					// Receive msg
+					if (read(newsock, buf, sizeof(buf)) < 0) {
+						perror("read");
+						exit(1);
+					}
+					printf("Read string: \n%s", buf);
+	
+					bzero(buf, sizeof buf); // Initialize buffer
+	
+					/*SendHTML(newsock, "200 OK", "text/plain",
+					 "<html><head></head><body><h1>Hello!</h1></body></html>");
+					 */
+					mySend(newsock,
+							"<html><head></head><body><h1>Hello!</h1></body></html>");
+				} while (1);
 			}
 		}
 
@@ -158,4 +169,87 @@ void printConfig() {
 	printf("Number of Threads: %d\n", conf.num_treads);
 	printf("Port Number: %d\n\n", conf.port);
 	printf("-------------------------\n\n");
+}
+
+void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML) {
+	char *head = "HTTP/1.1 ";
+	char *content_head = "\r\nContent-Type: ";
+	char *server_head = "\r\nServer: Server371";
+	char *connection_head = "\r\nConnection: keep-alive";
+	char *length_head = "\r\nContent-Length: ";
+	char *newline = "\r\n";
+	char Content_Length[100];
+	int content_length = strlen(HTML);
+
+	sprintf(Content_Length, "%i", content_length);
+
+	char *message = malloc(
+			(strlen(head) + strlen(content_head) + strlen(server_head)
+					+ strlen(length_head) + strlen(newline)
+					+ strlen(Status_code) + strlen(Content_Type)
+					+ strlen(Content_Length) + content_length + sizeof(char))
+					* 2);
+
+	if (message != NULL) {
+		strcpy(message, head);
+		strcat(message, Status_code);
+		strcat(message, content_head);
+		strcat(message, Content_Type);
+		strcat(message, server_head);
+		strcat(message, connection_head);
+		strcat(message, length_head);
+		strcat(message, Content_Length);
+		strcat(message, newline);
+		strcat(message, HTML);
+
+		printf("\nSending:\n%s", message);
+		printf("\n----------------\n");
+
+		// Send Msg
+		if (write(sock, message, sizeof(message)) < 0) {
+			perror("write");
+			exit(1);
+		}
+		free(message);
+	}
+}
+
+void mySend(int sock, char *HTML) {
+	char *head = "HTTP/1.1 200 OK";
+	char *server_head = "\r\nServer: Server371";
+	char *length_head = "\r\nContent-Length: ";
+	char *connection_head = "\r\nConnection: keep-alive";
+	char *content_head = "\r\nContent-Type: text/html";
+	char *newline = "\r\n";
+	char Content_Length[100];
+	int content_length = strlen(HTML);
+
+	sprintf(Content_Length, "%i", content_length);
+
+	char *message = malloc(
+			(strlen(head) + strlen(server_head) + strlen(length_head)
+					+ strlen(Content_Length) + strlen(connection_head)
+					+ strlen(content_head) + strlen(newline) + content_length
+					+ sizeof(char)) * 2);
+
+	if (message != NULL) {
+		strcpy(message, head);
+		strcat(message, server_head);
+		strcat(message, length_head);
+		strcat(message, Content_Length);
+		strcat(message, connection_head);
+		strcat(message, content_head);
+		strcat(message, newline);
+		strcat(message, HTML);
+
+		printf("\nSending:\n%s", message);
+		printf("\n----------------\n");
+
+		// Send Msg
+		if (write(sock, message, sizeof(message)) < 0) {
+			perror("write");
+			exit(1);
+		}
+		free(message);
+	}
 }
