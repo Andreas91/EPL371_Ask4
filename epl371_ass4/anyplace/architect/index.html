@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+
+<html>
+<link rel="icon" type="image/png" href="../logo.png">
+<head>
+    <title></title>
+    <style type="text/css">
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #content {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            top: 0px;
+        }
+    </style>
+
+    <script type="text/javascript">
+	function fixUrl(){
+		//alert(window.location.search);
+		document.getElementById("ciframe").src = "http://anyplace.rayzit.com/architect/" + window.location.search;
+	}
+	//fixUrl();
+    </script>
+
+</head>
+<body onload="fixUrl();">
+<div id="content">
+    <iframe id="ciframe" width="100%" height="100%" frameborder="0" src=""/>
+</div>
+</body>
+</html>
