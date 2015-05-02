@@ -27,10 +27,14 @@ void printConfig();
 struct config conf;
 
 int main(int argc, char *argv[]) {
-	int sock, serverlen;
-	struct sockaddr_in server;
-	struct sockaddr *serverptr;
 
+	// Variables
+	int sock, newsock, serverlen, clientlen;
+	struct sockaddr_in server, client;
+	struct sockaddr *serverptr, *clientptr;
+	struct hostent *rem;
+
+	// Set and print server's config
 	setConfig();
 	printConfig();
 
@@ -39,19 +43,19 @@ int main(int argc, char *argv[]) {
 		perror("socket");
 		exit(1);
 	}
-	
+
 	server.sin_family = AF_INET; // Internet domain
 	server.sin_addr.s_addr = htonl(INADDR_ANY); // My Internet address
-	server.sin_port = htons(conf.port);
+	server.sin_port = htons(conf.port); // The config port
 	serverptr = (struct sockaddr *) &server;
 	serverlen = sizeof server;
-	
+
 	// Bind socket to an address
 	if (bind(sock, serverptr, serverlen) < 0) {
 		perror("bind");
 		exit(1);
 	}
-	
+
 	// Listen for connections
 	if (listen(sock, 5) < 0) {
 		perror("listen");
@@ -59,9 +63,38 @@ int main(int argc, char *argv[]) {
 	}
 
 	printf("Listening for connections to port %d\n", conf.port);
-	
-	while(1){
-		
+
+	while (1) {
+		clientptr = (struct sockaddr *) &client;
+		clientlen = sizeof client;
+
+		// Accept Connection
+		if ((newsock = accept(sock, clientptr, &clientlen)) < 0) {
+			perror("accept");
+			exit(1);
+		}
+
+		// Find client's address
+		rem = gethostbyaddr((char *) &client.sin_addr.s_addr,
+				sizeof client.sin_addr.s_addr, client.sin_family);
+		if (rem == NULL) {
+			perror("gethostbyaddr");
+			exit(1);
+		}
+		printf("Accepted connection from %s\n", rem->h_name);
+
+		// Create child for serving the client
+		switch (fork()) {
+			case -1 : {perror("fork"); exit(1);}
+			case 0 : {
+				
+			}
+		}
+
+		// Close Socket
+		close(newsock); /* Close socket */
+		printf("Connection from %s is closed\n", rem->h_name);
+		exit(0);
 	}
 
 	return 0;
@@ -73,7 +106,11 @@ int main(int argc, char *argv[]) {
  */
 void setConfig() {
 	FILE *file = fopen(FCONFIG, "r");
-
+	
+	if (file == NULL){
+		printf("*** Unable to configure server! System will now exit. ***\n");
+		exit(0);
+	}
 	if (file != NULL) {
 		char line[MAXBUF];
 		int i = 0;
