@@ -23,11 +23,13 @@ struct config {
 void setConfig();
 void printConfig();
 void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML);
-void mySend(int sock, char *HTML);
+void mySend(int sock, char *Status_code, char *Content_Type, char *HTML);
 
 // Global Variables
 struct config conf;
-//char *reqMethod;
+char *head_method; // GET | HEAD | DELETE
+char *head_path;   // path to send
+char *head_con;    // keep-alive | close
 
 int main(int argc, char *argv[]) {
 
@@ -52,7 +54,7 @@ int main(int argc, char *argv[]) {
 	server.sin_addr.s_addr = htonl(INADDR_ANY); // My Internet address
 	server.sin_port = htons(conf.port); // The config port
 	serverptr = (struct sockaddr *) &server;
-	serverlen = sizeof server;
+	serverlen = sizeof(server);
 
 	// Bind socket to an address
 	if (bind(sock, serverptr, serverlen) < 0) {
@@ -70,7 +72,7 @@ int main(int argc, char *argv[]) {
 
 	while (1) {
 		clientptr = (struct sockaddr *) &client;
-		clientlen = sizeof client;
+		clientlen = sizeof(client);
 
 		// Accept Connection
 		if ((newsock = accept(sock, clientptr, &clientlen)) < 0) {
@@ -80,7 +82,7 @@ int main(int argc, char *argv[]) {
 
 		// Find client's address
 		rem = gethostbyaddr((char *) &client.sin_addr.s_addr,
-				sizeof client.sin_addr.s_addr, client.sin_family);
+				sizeof(client.sin_addr.s_addr), client.sin_family);
 		if (rem == NULL) {
 			perror("gethostbyaddr");
 			exit(1);
@@ -93,26 +95,22 @@ int main(int argc, char *argv[]) {
 			perror("fork");
 			exit(1);
 		}
-			case 0: {
-				do {
-					bzero(buf, sizeof buf); // Initialize buffer
-	
-					// Receive msg
-					if (read(newsock, buf, sizeof(buf)) < 0) {
-						perror("read");
-						exit(1);
-					}
-					printf("Read string: \n%s", buf);
-	
-					bzero(buf, sizeof buf); // Initialize buffer
-	
-					/*SendHTML(newsock, "200 OK", "text/plain",
-					 "<html><head></head><body><h1>Hello!</h1></body></html>");
-					 */
-					mySend(newsock,
-							"<html><head></head><body><h1>Hello!</h1></body></html>");
-				} while (1);
+		case 0: {
+			int i = 0;
+			bzero(buf, sizeof(buf)); // Initialize buffer
+
+			// Receive msg
+			if (read(newsock, buf, strlen(buf)) < 0) {
+				perror("read");
+				exit(1);
 			}
+			printf("Read string: \n%s", buf);
+
+			bzero(buf, sizeof(buf)); // Initialize buffer
+
+			mySend(newsock, "200 OK", "text/html",
+					"<html><head></head><body><h1>Hello!</h1></body></html>");
+		}
 		}
 
 		// Close Socket
@@ -214,12 +212,12 @@ void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	}
 }
 
-void mySend(int sock, char *HTML) {
-	char *head = "HTTP/1.1 200 OK";
+void mySend(int sock, char *Status_code, char *Content_Type, char *HTML) {
+	char *head = "HTTP/1.1 ";
 	char *server_head = "\r\nServer: Server371";
 	char *length_head = "\r\nContent-Length: ";
 	char *connection_head = "\r\nConnection: keep-alive";
-	char *content_head = "\r\nContent-Type: text/html";
+	char *content_head = "\r\nContent-Type: ";
 	char *newline = "\r\n";
 	char Content_Length[100];
 	int content_length = strlen(HTML);
@@ -227,18 +225,22 @@ void mySend(int sock, char *HTML) {
 	sprintf(Content_Length, "%i", content_length);
 
 	char *message = malloc(
-			(strlen(head) + strlen(server_head) + strlen(length_head)
-					+ strlen(Content_Length) + strlen(connection_head)
-					+ strlen(content_head) + strlen(newline) + content_length
+			(strlen(head) + strlen(Status_code) + strlen(server_head)
+					+ strlen(length_head) + strlen(Content_Length)
+					+ strlen(connection_head) + strlen(content_head)
+					+ strlen(Content_Type) + strlen(newline) + content_length
 					+ sizeof(char)) * 2);
 
 	if (message != NULL) {
 		strcpy(message, head);
+		strcat(message, Status_code);
 		strcat(message, server_head);
 		strcat(message, length_head);
 		strcat(message, Content_Length);
 		strcat(message, connection_head);
 		strcat(message, content_head);
+		strcat(message, Content_Type);
+		strcat(message, newline);
 		strcat(message, newline);
 		strcat(message, HTML);
 
@@ -246,7 +248,7 @@ void mySend(int sock, char *HTML) {
 		printf("\n----------------\n");
 
 		// Send Msg
-		if (write(sock, message, sizeof(message)) < 0) {
+		if (write(sock, message, strlen(message)) < 0) {
 			perror("write");
 			exit(1);
 		}
