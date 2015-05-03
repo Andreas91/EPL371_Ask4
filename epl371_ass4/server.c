@@ -22,14 +22,19 @@ struct config {
 // Functions Prototypes
 void setConfig();
 void printConfig();
-void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML);
-void mySend(int sock, char *Status_code, char *Content_Type, char *HTML);
+void getRequest(int sock);
+void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML);
+void response404(int sock);
+void response501(int sock);
+void responseGet(int sock);
+void responseHead(int sock);
+void responseDelete(int sock);
 
 // Global Variables
 struct config conf;
-char *head_method; // GET | HEAD | DELETE
-char *head_path;   // path to send
-char *head_con;    // keep-alive | close
+char req_method[100]; // GET | HEAD | DELETE
+char req_path[100];   // path to send
+char req_con[100];    // keep-alive | close
 
 int main(int argc, char *argv[]) {
 
@@ -38,7 +43,6 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in server, client;
 	struct sockaddr *serverptr, *clientptr;
 	struct hostent *rem;
-	char buf[512];
 
 	// Set and print server's config
 	setConfig();
@@ -96,20 +100,27 @@ int main(int argc, char *argv[]) {
 			exit(1);
 		}
 		case 0: {
-			int i = 0;
-			bzero(buf, sizeof(buf)); // Initialize buffer
+			// While connection: keep-alive
+			do {
+				// Get Request
+				getRequest(newsock);
 
-			// Receive msg
-			if (read(newsock, buf, strlen(buf)) < 0) {
-				perror("read");
-				exit(1);
-			}
-			printf("Read string: \n%s", buf);
-
-			bzero(buf, sizeof(buf)); // Initialize buffer
-
-			mySend(newsock, "200 OK", "text/html",
-					"<html><head></head><body><h1>Hello!</h1></body></html>");
+				// Check Request Method
+				int method = -1;
+				if (strcmp(req_method, "GET") == 0) method = 1;
+				else if(strcmp(req_method, "HEAD") == 0) method = 2;
+				else if(strcmp(req_method, "DELETE") == 0) method = 3;
+				else method = -1;
+				
+				// Response by method
+				switch (method){
+					case 1: responseGet(newsock); break;
+					case 2: responseHead(newsock); break;
+					case 3: responseDelete(newsock); break;
+					case -1: response501(newsock);break;
+				}
+				
+			} while (strcmp(req_con, "keep-alive") == 0);
 		}
 		}
 
@@ -169,50 +180,43 @@ void printConfig() {
 	printf("-------------------------\n\n");
 }
 
-void SendHTML(int sock, char *Status_code, char *Content_Type, char *HTML) {
-	char *head = "HTTP/1.1 ";
-	char *content_head = "\r\nContent-Type: ";
-	char *server_head = "\r\nServer: Server371";
-	char *connection_head = "\r\nConnection: keep-alive";
-	char *length_head = "\r\nContent-Length: ";
-	char *newline = "\r\n";
-	char Content_Length[100];
-	int content_length = strlen(HTML);
+void getRequest(int sock) {
+	char buf[512];
+	bzero(buf, sizeof(buf)); // Initialize buffer
 
-	sprintf(Content_Length, "%i", content_length);
-
-	char *message = malloc(
-			(strlen(head) + strlen(content_head) + strlen(server_head)
-					+ strlen(length_head) + strlen(newline)
-					+ strlen(Status_code) + strlen(Content_Type)
-					+ strlen(Content_Length) + content_length + sizeof(char))
-					* 2);
-
-	if (message != NULL) {
-		strcpy(message, head);
-		strcat(message, Status_code);
-		strcat(message, content_head);
-		strcat(message, Content_Type);
-		strcat(message, server_head);
-		strcat(message, connection_head);
-		strcat(message, length_head);
-		strcat(message, Content_Length);
-		strcat(message, newline);
-		strcat(message, HTML);
-
-		printf("\nSending:\n%s", message);
-		printf("\n----------------\n");
-
-		// Send Msg
-		if (write(sock, message, sizeof(message)) < 0) {
-			perror("write");
-			exit(1);
-		}
-		free(message);
+	// Read from socket
+	if (read(sock, buf, sizeof(buf)) < 0) {
+		perror("read");
+		exit(1);
 	}
+	printf("Read: \n%s", buf);
+
+	// Tokenize Headers
+	char *line = strtok(buf, " \r\n");
+
+	// Get Request method
+	strcpy(req_method, line);
+	line = strtok(NULL, " \r\n");
+
+	// Get Request path
+	strcpy(req_path, line);
+	line = strtok(NULL, " \r\n");
+
+	// Get Request Connection
+	while (line != NULL) {
+		if (strcmp(line, "Connection:") == 0) {
+			line = strtok(NULL, " \r\n");
+			strcpy(req_con, line);
+		}
+		line = strtok(NULL, " \r\n");
+	}
+
+	printf("Request Method: %s\n", req_method);
+	printf("Request Path: %s\n", req_path);
+	printf("Request Connection: %s\n", req_con);
 }
 
-void mySend(int sock, char *Status_code, char *Content_Type, char *HTML) {
+void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	char *head = "HTTP/1.1 ";
 	char *server_head = "\r\nServer: Server371";
 	char *length_head = "\r\nContent-Length: ";
@@ -254,4 +258,24 @@ void mySend(int sock, char *Status_code, char *Content_Type, char *HTML) {
 		}
 		free(message);
 	}
+}
+
+void response404(int sock){
+	sentResponse(sock, "404 Not Found", "text/plain", "Document not found!");
+}
+
+void response501(int sock){
+	sentResponse(sock, "501 Not Implemented", "text/plain", "Method not implemented!");
+}
+
+void responseGet(int sock){
+	sentResponse(sock, "200 OK", "text/plain", "OK GET");
+}
+
+void responseHead(int sock){
+	sentResponse(sock, "200 OK", "text/plain", "OK Head");
+}
+
+void responseDelete(int sock){
+	sentResponse(sock, "200 OK", "text/plain", "OK Delete");
 }
