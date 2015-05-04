@@ -24,6 +24,8 @@ struct config {
 // Functions Prototypes
 void setConfig();
 void printConfig();
+char *get_filename_ext(char *filename);
+char *get_content_type(char *filename);
 void getRequest(int sock);
 void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML);
 void responseGet(int sock);
@@ -193,6 +195,56 @@ void printConfig() {
 	printf("-------------------------\n\n");
 }
 
+/**
+ * Returns the extension of the filename or null.
+ * @param filename Filename to find it's extension.
+ * @return Filename's extension or null.
+ */
+char *get_filename_ext(char *filename) {
+	char *dot = strrchr(filename, '.');
+	if (!dot || dot == filename)
+		return "";
+	return dot + 1;
+}
+
+/**
+ * By using the get_filename_ext, this function
+ * returns the content_type of the given filename.
+ * @param filename Filename to find it's content-type.
+ * @return Filename's content-type.
+ */
+char *get_content_type(char *filename) {
+	char *ext = get_filename_ext(filename);
+
+	if (strcmp(ext, "txt") == 0 || strcmp(ext, "sed") == 0
+			|| strcmp(ext, "awk") == 0 || strcmp(ext, "c") == 0
+			|| strcmp(ext, "h") == 0) {
+		return ("text/plain");
+	}
+
+	if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) {
+		return ("text/html");
+	}
+
+	if (strcmp(ext, "jpeg") == 0 || strcmp(ext, "jpg") == 0) {
+		return ("image/jpeg");
+	}
+
+	if (strcmp(ext, "png") == 0) {
+		return ("image/png");
+	}
+
+	if (strcmp(ext, "gif") == 0) {
+		return ("image/gif");
+	}
+
+	if (strcmp(ext, "pdf") == 0) {
+		return ("application/pdf");
+	}
+
+	return "application/octet-stream";
+}
+
 void getRequest(int sock) {
 	char buf[512];
 	bzero(buf, sizeof(buf)); // Initialize buffer
@@ -253,7 +305,7 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 		sprintf(connection, "%s", "keep-alive");
 	else
 		sprintf(connection, "%s", "close");
-	
+
 	// Malloc for response message
 	sprintf(Content_Length, "%i", content_length);
 	char *message = malloc(
@@ -262,7 +314,7 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 					+ strlen(connection_head) + strlen(connection)
 					+ strlen(content_head) + strlen(Content_Type)
 					+ strlen(newline) + content_length + sizeof(char)) * 2);
-	
+
 	// Built response message
 	if (message != NULL) {
 		strcpy(message, head);
@@ -298,8 +350,26 @@ void responseGet(int sock) {
 		if (S_ISDIR(s.st_mode)) {
 			sentResponse(sock, "403 Forbidden", "text/plain", "");
 		} else {
+			// Get file's content-type
+			char *ctype = get_content_type(req_path);
+
 			// Get file's content
-			sentResponse(sock, "200 OK", "text/plain", "OK GET\r\n");
+			char *buffer = 0;
+			long length;
+			FILE * f = fopen(req_path, "rb");
+
+			if (f) {
+				fseek(f, 0, SEEK_END);
+				length = ftell(f);
+				fseek(f, 0, SEEK_SET);
+				buffer = malloc(length);
+				if (buffer) {
+					fread(buffer, 1, length, f);
+				}
+				fclose(f);
+			}
+
+			sentResponse(sock, "200 OK", ctype, buffer);
 		}
 	}
 }
