@@ -228,6 +228,14 @@ void getRequest(int sock) {
 	}
 }
 
+/**
+ * The functions builds the appropriate response base on the given
+ * arguments and writes on the given socket.
+ * @param sock Given socket to response to.
+ * @param Status_code Status Code for the response (e.g. "200 OK").
+ * @param Content_Type Content type for the response (e.g. "text/plain").
+ * @param HTML The raw content for the response.
+ */
 void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	char *head = "HTTP/1.1 ";
 	char *server_head = "\r\nServer: Server371";
@@ -281,23 +289,47 @@ void responseGet(int sock) {
  */
 void responseHead(int sock) {
 	struct stat s;
-	printf("Checking if exists: %s\n", req_path);
 	int exists = stat(req_path, &s);
 	if (exists == -1) {
-		printf("Not found!\n");
 		sentResponse(sock, "404 Not Found", "text/plain", "");
 	} else {
 		// Directory listing denied, show 403
 		if (S_ISDIR(s.st_mode)) {
-			printf("It exists, but it's a directory\n");
 			sentResponse(sock, "403 Forbidden", "text/plain", "");
 		} else {
-			printf("Yeah, it exists!\n");
 			sentResponse(sock, "200 OK", "text/plain", "");
 		}
 	}
 }
 
+/**
+ * Tries to delete a file. It response as follows:
+ * Exists & Is File & Deleted: 200.
+ * Exists & Is File & Not Deleted: 500.
+ * Exists & Is Folder: 403.
+ * Not Exists: 404.
+ * @param sock Given socket to response to.
+ */
 void responseDelete(int sock) {
-	sentResponse(sock, "200 OK", "text/plain", "OK Delete\n");
+	struct stat s;
+	int exists = stat(req_path, &s);
+	if (exists == -1) {
+		sentResponse(sock, "404 Not Found", "text/plain", "");
+	} else {
+		// Directory delete denied, show 403
+		if (S_ISDIR(s.st_mode)) {
+			sentResponse(sock, "403 Forbidden", "text/plain", "");
+		} else {
+			// try to delete requested file
+			int status = remove(req_path);
+			if (status == 0){
+				printf("%s file deleted successfully.\n", req_path);
+				sentResponse(sock, "200 OK", "text/plain", "File Deleted\n");
+			}else {
+				printf("Unable to delete the file\n");
+				perror("Error");
+				sentResponse(sock, "500 Internal Error", "text/plain", "Unable to delete the file\n");
+			}
+		}
+	}
 }
