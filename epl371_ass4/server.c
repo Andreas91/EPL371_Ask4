@@ -1,9 +1,11 @@
 // Libraries
-#include <sys/types.h> // For sockets
-#include <sys/socket.h> // For sockets
-#include <netinet/in.h> // For Internet sockets
-#include <netdb.h> // For gethostbyaddr
-#include <stdio.h> // For I/O
+#include <sys/types.h>   // For sockets
+#include <sys/socket.h>  // For sockets
+#include <netinet/in.h>  // For Internet sockets
+#include <netdb.h>       // For get host by address
+#include <pthread.h>     // For threading
+#include <stdio.h>       // For I/O
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,8 +26,6 @@ void setConfig();
 void printConfig();
 void getRequest(int sock);
 void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML);
-void response404(int sock);
-void response501(int sock);
 void responseGet(int sock);
 void responseHead(int sock);
 void responseDelete(int sock);
@@ -107,19 +107,32 @@ int main(int argc, char *argv[]) {
 
 				// Check Request Method
 				int method = -1;
-				if (strcmp(req_method, "GET") == 0) method = 1;
-				else if(strcmp(req_method, "HEAD") == 0) method = 2;
-				else if(strcmp(req_method, "DELETE") == 0) method = 3;
-				else method = -1;
-				
+				if (strcmp(req_method, "GET") == 0)
+					method = 1;
+				else if (strcmp(req_method, "HEAD") == 0)
+					method = 2;
+				else if (strcmp(req_method, "DELETE") == 0)
+					method = 3;
+				else
+					method = -1;
+
 				// Response by method
-				switch (method){
-					case 1: responseGet(newsock); break;
-					case 2: responseHead(newsock); break;
-					case 3: responseDelete(newsock); break;
-					case -1: response501(newsock);break;
+				switch (method) {
+				case 1:
+					responseGet(newsock);
+					break;
+				case 2:
+					responseHead(newsock);
+					break;
+				case 3:
+					responseDelete(newsock);
+					break;
+				case -1:
+					sentResponse(newsock, "501 Not Implemented", "text/plain",
+							"Method not implemented!\r\n");
+					break;
 				}
-				
+
 			} while (strcmp(req_con, "keep-alive") == 0);
 		}
 		}
@@ -189,7 +202,6 @@ void getRequest(int sock) {
 		perror("read");
 		exit(1);
 	}
-	printf("Read: \n%s", buf);
 
 	// Tokenize Headers
 	char *line = strtok(buf, " \r\n");
@@ -199,7 +211,11 @@ void getRequest(int sock) {
 	line = strtok(NULL, " \r\n");
 
 	// Get Request path
-	strcpy(req_path, line);
+	strcpy(req_path, "anyplace");
+	strcat(req_path, line);
+	if (strcmp(line, "/") == 0) {
+		strcat(req_path, "index.html");
+	}
 	line = strtok(NULL, " \r\n");
 
 	// Get Request Connection
@@ -210,10 +226,6 @@ void getRequest(int sock) {
 		}
 		line = strtok(NULL, " \r\n");
 	}
-
-	printf("Request Method: %s\n", req_method);
-	printf("Request Path: %s\n", req_path);
-	printf("Request Connection: %s\n", req_con);
 }
 
 void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
@@ -248,9 +260,6 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 		strcat(message, newline);
 		strcat(message, HTML);
 
-		printf("\nSending:\n%s", message);
-		printf("\n----------------\n");
-
 		// Send Msg
 		if (write(sock, message, strlen(message)) < 0) {
 			perror("write");
@@ -260,22 +269,35 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	}
 }
 
-void response404(int sock){
-	sentResponse(sock, "404 Not Found", "text/plain", "Document not found!");
+void responseGet(int sock) {
+	sentResponse(sock, "200 OK", "text/plain", "OK GET\r\n");
 }
 
-void response501(int sock){
-	sentResponse(sock, "501 Not Implemented", "text/plain", "Method not implemented!");
+/**
+ * Checks if the requested path exists. If it does and it's a
+ * file, it sends 200 OK, if the path is a directory, it sends
+ * 403 Forbidden and if it doesn't exists it sends 404 Not Found.
+ * @param sock Given socket to response to.
+ */
+void responseHead(int sock) {
+	struct stat s;
+	printf("Checking if exists: %s\n", req_path);
+	int exists = stat(req_path, &s);
+	if (exists == -1) {
+		printf("Not found!\n");
+		sentResponse(sock, "404 Not Found", "text/plain", "");
+	} else {
+		// Directory listing denied, show 403
+		if (S_ISDIR(s.st_mode)) {
+			printf("It exists, but it's a directory\n");
+			sentResponse(sock, "403 Forbidden", "text/plain", "");
+		} else {
+			printf("Yeah, it exists!\n");
+			sentResponse(sock, "200 OK", "text/plain", "");
+		}
+	}
 }
 
-void responseGet(int sock){
-	sentResponse(sock, "200 OK", "text/plain", "OK GET");
-}
-
-void responseHead(int sock){
-	sentResponse(sock, "200 OK", "text/plain", "OK Head");
-}
-
-void responseDelete(int sock){
-	sentResponse(sock, "200 OK", "text/plain", "OK Delete");
+void responseDelete(int sock) {
+	sentResponse(sock, "200 OK", "text/plain", "OK Delete\n");
 }
