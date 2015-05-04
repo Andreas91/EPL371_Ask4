@@ -226,6 +226,8 @@ void getRequest(int sock) {
 		}
 		line = strtok(NULL, " \r\n");
 	}
+	printf("--------------------------------------------------\n");
+	printf("Request: %s %s (%s)\n", req_method, req_path, req_con);
 }
 
 /**
@@ -237,24 +239,31 @@ void getRequest(int sock) {
  * @param HTML The raw content for the response.
  */
 void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
+	// Set Response Headers
 	char *head = "HTTP/1.1 ";
 	char *server_head = "\r\nServer: Server371";
 	char *length_head = "\r\nContent-Length: ";
-	char *connection_head = "\r\nConnection: keep-alive";
+	char *connection_head = "\r\nConnection: ";
 	char *content_head = "\r\nContent-Type: ";
 	char *newline = "\r\n";
 	char Content_Length[100];
 	int content_length = strlen(HTML);
-
+	char connection[100];
+	if (strcmp(req_con, "keep-alive") == 0)
+		sprintf(connection, "%s", "keep-alive");
+	else
+		sprintf(connection, "%s", "close");
+	
+	// Malloc for response message
 	sprintf(Content_Length, "%i", content_length);
-
 	char *message = malloc(
 			(strlen(head) + strlen(Status_code) + strlen(server_head)
 					+ strlen(length_head) + strlen(Content_Length)
-					+ strlen(connection_head) + strlen(content_head)
-					+ strlen(Content_Type) + strlen(newline) + content_length
-					+ sizeof(char)) * 2);
-
+					+ strlen(connection_head) + strlen(connection)
+					+ strlen(content_head) + strlen(Content_Type)
+					+ strlen(newline) + content_length + sizeof(char)) * 2);
+	
+	// Built response message
 	if (message != NULL) {
 		strcpy(message, head);
 		strcat(message, Status_code);
@@ -262,23 +271,37 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 		strcat(message, length_head);
 		strcat(message, Content_Length);
 		strcat(message, connection_head);
+		strcat(message, connection);
 		strcat(message, content_head);
 		strcat(message, Content_Type);
 		strcat(message, newline);
 		strcat(message, newline);
 		strcat(message, HTML);
 
-		// Send Msg
+		// Send message
 		if (write(sock, message, strlen(message)) < 0) {
 			perror("write");
 			exit(1);
 		}
 		free(message);
 	}
+	printf("Response: %s %s (%s)\n", head, Status_code, connection);
 }
 
 void responseGet(int sock) {
-	sentResponse(sock, "200 OK", "text/plain", "OK GET\r\n");
+	struct stat s;
+	int exists = stat(req_path, &s);
+	if (exists == -1) {
+		sentResponse(sock, "404 Not Found", "text/plain", "");
+	} else {
+		// Directory listing denied, show 403
+		if (S_ISDIR(s.st_mode)) {
+			sentResponse(sock, "403 Forbidden", "text/plain", "");
+		} else {
+			// Get file's content
+			sentResponse(sock, "200 OK", "text/plain", "OK GET\r\n");
+		}
+	}
 }
 
 /**
@@ -322,13 +345,11 @@ void responseDelete(int sock) {
 		} else {
 			// try to delete requested file
 			int status = remove(req_path);
-			if (status == 0){
-				printf("%s file deleted successfully.\n", req_path);
+			if (status == 0) {
 				sentResponse(sock, "200 OK", "text/plain", "File Deleted\n");
-			}else {
-				printf("Unable to delete the file\n");
-				perror("Error");
-				sentResponse(sock, "500 Internal Error", "text/plain", "Unable to delete the file\n");
+			} else {
+				sentResponse(sock, "500 Internal Error", "text/plain",
+						"Unable to delete the file\n");
 			}
 		}
 	}
