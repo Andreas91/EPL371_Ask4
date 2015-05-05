@@ -20,33 +20,37 @@ struct config {
 	int num_treads;
 	int port;
 };
+struct streq {
+	char method[15]; // GET | HEAD | DELETE
+	char path[256];   // path to send
+	char con[15];    // keep-alive | close
+};
 
 // Functions Prototypes
 void setConfig();
 void printConfig();
 char *get_filename_ext(char *filename);
 char *get_content_type(char *filename);
-void getRequest(int sock);
-void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML);
-void responseGet(int sock);
-void responseHead(int sock);
-void responseDelete(int sock);
+void *connection_handler(void *socket_desc);
+void getRequest(int sock, struct streq *r);
+void sentResponse(int sock, char *con, char *Status_code, char *Content_Type,
+		char *HTML);
+void responseGet(int sock, struct streq r);
+void responseHead(int sock, struct streq r);
+void responseDelete(int sock, struct streq r);
 
 // Global Variables
 struct config conf;
-char req_method[100]; // GET | HEAD | DELETE
-char req_path[100];   // path to send
-char req_con[100];    // keep-alive | close
 
 int main(int argc, char *argv[]) {
 
 	// Variables
-	int sock, newsock, serverlen, clientlen;
+	int sock, newsock, serverlen, c, *new_sock;
 	struct sockaddr_in server, client;
-	struct sockaddr *serverptr, *clientptr;
+	struct sockaddr *serverptr;
 	struct hostent *rem;
 
-	// Set and print server's config
+	// Set and print server's configuration
 	setConfig();
 	printConfig();
 
@@ -56,6 +60,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
+	//Prepare the sockaddr_in structure
 	server.sin_family = AF_INET; // Internet domain
 	server.sin_addr.s_addr = htonl(INADDR_ANY); // My Internet address
 	server.sin_port = htons(conf.port); // The config port
@@ -69,22 +74,16 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Listen for connections
-	if (listen(sock, 5) < 0) {
+	if (listen(sock, 3) < 0) {
 		perror("listen");
 		exit(1);
 	}
 
+	//Accept and incoming connection
 	printf("Listening for connections to port %d\n", conf.port);
 
-	while (1) {
-		clientptr = (struct sockaddr *) &client;
-		clientlen = sizeof(client);
-
-		// Accept Connection
-		if ((newsock = accept(sock, clientptr, &clientlen)) < 0) {
-			perror("accept");
-			exit(1);
-		}
+	c = sizeof(struct sockaddr_in);
+	while ((newsock = accept(sock, (struct sockaddr *) &client, (socklen_t*) &c))) {
 
 		// Find client's address
 		rem = gethostbyaddr((char *) &client.sin_addr.s_addr,
@@ -95,54 +94,26 @@ int main(int argc, char *argv[]) {
 		}
 		printf("Accepted connection from %s\n", rem->h_name);
 
-		// Create child for serving the client
-		switch (fork()) {
-		case -1: {
-			perror("fork");
+		pthread_t sniffer_thread;
+		new_sock = malloc(1);
+		*new_sock = newsock;
+
+		if (pthread_create(&sniffer_thread, NULL, connection_handler,
+				(void*) new_sock) < 0) {
+			perror("could not create thread");
 			exit(1);
-		}
-		case 0: {
-			// While connection: keep-alive
-			do {
-				// Get Request
-				getRequest(newsock);
-
-				// Check Request Method
-				int method = -1;
-				if (strcmp(req_method, "GET") == 0)
-					method = 1;
-				else if (strcmp(req_method, "HEAD") == 0)
-					method = 2;
-				else if (strcmp(req_method, "DELETE") == 0)
-					method = 3;
-				else
-					method = -1;
-
-				// Response by method
-				switch (method) {
-				case 1:
-					responseGet(newsock);
-					break;
-				case 2:
-					responseHead(newsock);
-					break;
-				case 3:
-					responseDelete(newsock);
-					break;
-				case -1:
-					sentResponse(newsock, "501 Not Implemented", "text/plain",
-							"Method not implemented!\r\n");
-					break;
-				}
-
-			} while (strcmp(req_con, "keep-alive") == 0);
-		}
+			;
 		}
 
-		// Close Socket
-		close(newsock);
-		printf("Connection from %s is closed\n", rem->h_name);
-		exit(0);
+		//Now join the thread , so that we dont terminate before the thread
+		//pthread_join( sniffer_thread , NULL);
+		printf("Handler assigned\n");
+	}
+
+	// Accept Connection Failed
+	if (newsock < 0) {
+		perror("accept failed");
+		return 1;
 	}
 
 	return 0;
@@ -234,6 +205,14 @@ char *get_content_type(char *filename) {
 		return ("image/png");
 	}
 
+	if (strcmp(ext, "css") == 0) {
+		return ("text/css");
+	}
+
+	if (strcmp(ext, "js") == 0) {
+		return ("text/javascript");
+	}
+
 	if (strcmp(ext, "gif") == 0) {
 		return ("image/gif");
 	}
@@ -245,7 +224,40 @@ char *get_content_type(char *filename) {
 	return "application/octet-stream";
 }
 
-void getRequest(int sock) {
+/**
+ * Handles connection for each client
+ * @param socket_desc
+ */
+void *connection_handler(void *socket_desc) {
+
+	int sock = *(int*) socket_desc; //Get the socket descriptor
+	struct streq req;
+
+	// While connection: keep-alive
+	do {
+		// Read the Request
+		getRequest(sock, &req);
+
+		// Response by method
+		if (strcmp(req.method, "GET") == 0)
+			responseGet(sock, req);
+		else if (strcmp(req.method, "HEAD") == 0)
+			responseHead(sock, req);
+		else if (strcmp(req.method, "DELETE") == 0)
+			responseDelete(sock, req);
+		else
+			sentResponse(sock, req.con, "501 Not Implemented", "text/plain",
+					"Method not implemented!\r\n");
+
+	} while (strcmp(req.con, "keep-alive") == 0);
+	printf("Client disconnected\n");
+
+	//Free the socket pointer
+	free(socket_desc);
+	return 0;
+}
+
+void getRequest(int sock, struct streq *r) {
 	char buf[512];
 	bzero(buf, sizeof(buf)); // Initialize buffer
 
@@ -259,14 +271,14 @@ void getRequest(int sock) {
 	char *line = strtok(buf, " \r\n");
 
 	// Get Request method
-	strcpy(req_method, line);
+	strcpy(r->method, line);
 	line = strtok(NULL, " \r\n");
 
 	// Get Request path
-	strcpy(req_path, "anyplace");
-	strcat(req_path, line);
+	strcpy(r->path, "anyplace");
+	strcat(r->path, line);
 	if (strcmp(line, "/") == 0) {
-		strcat(req_path, "index.html");
+		strcat(r->path, "index.html");
 	}
 	line = strtok(NULL, " \r\n");
 
@@ -274,12 +286,12 @@ void getRequest(int sock) {
 	while (line != NULL) {
 		if (strcmp(line, "Connection:") == 0) {
 			line = strtok(NULL, " \r\n");
-			strcpy(req_con, line);
+			strcpy(r->con, line);
 		}
 		line = strtok(NULL, " \r\n");
 	}
 	printf("--------------------------------------------------\n");
-	printf("Request: %s %s (%s)\n", req_method, req_path, req_con);
+	printf("Request: %s %s (%s)\n", r->method, r->path, r->con);
 }
 
 /**
@@ -290,7 +302,8 @@ void getRequest(int sock) {
  * @param Content_Type Content type for the response (e.g. "text/plain").
  * @param HTML The raw content for the response.
  */
-void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
+void sentResponse(int sock, char *con, char *Status_code, char *Content_Type,
+		char *HTML) {
 	// Set Response Headers
 	char *head = "HTTP/1.1 ";
 	char *server_head = "\r\nServer: Server371";
@@ -301,7 +314,7 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	char Content_Length[100];
 	int content_length = strlen(HTML);
 	char connection[100];
-	if (strcmp(req_con, "keep-alive") == 0)
+	if (strcmp(con, "keep-alive") == 0)
 		sprintf(connection, "%s", "keep-alive");
 	else
 		sprintf(connection, "%s", "close");
@@ -340,23 +353,23 @@ void sentResponse(int sock, char *Status_code, char *Content_Type, char *HTML) {
 	printf("Response: %s %s (%s)\n", head, Status_code, connection);
 }
 
-void responseGet(int sock) {
+void responseGet(int sock, struct streq r) {
 	struct stat s;
-	int exists = stat(req_path, &s);
+	int exists = stat(r.path, &s);
 	if (exists == -1) {
-		sentResponse(sock, "404 Not Found", "text/plain", "");
+		sentResponse(sock, r.con, "404 Not Found", "text/html", "<h1>HTTP Error 404</h1>");
 	} else {
 		// Directory listing denied, show 403
 		if (S_ISDIR(s.st_mode)) {
-			sentResponse(sock, "403 Forbidden", "text/plain", "");
+			sentResponse(sock, r.con, "403 Forbidden", "text/plain", "");
 		} else {
 			// Get file's content-type
-			char *ctype = get_content_type(req_path);
+			char *ctype = get_content_type(r.path);
 
 			// Get file's content
 			char *buffer = 0;
 			long length;
-			FILE * f = fopen(req_path, "rb");
+			FILE * f = fopen(r.path, "rb");
 
 			if (f) {
 				fseek(f, 0, SEEK_END);
@@ -368,8 +381,7 @@ void responseGet(int sock) {
 				}
 				fclose(f);
 			}
-
-			sentResponse(sock, "200 OK", ctype, buffer);
+			sentResponse(sock, r.con, "200 OK", ctype, buffer);
 		}
 	}
 }
@@ -380,17 +392,17 @@ void responseGet(int sock) {
  * 403 Forbidden and if it doesn't exists it sends 404 Not Found.
  * @param sock Given socket to response to.
  */
-void responseHead(int sock) {
+void responseHead(int sock, struct streq r) {
 	struct stat s;
-	int exists = stat(req_path, &s);
+	int exists = stat(r.path, &s);
 	if (exists == -1) {
-		sentResponse(sock, "404 Not Found", "text/plain", "");
+		sentResponse(sock, r.con, "404 Not Found", "text/plain", "");
 	} else {
 		// Directory listing denied, show 403
 		if (S_ISDIR(s.st_mode)) {
-			sentResponse(sock, "403 Forbidden", "text/plain", "");
+			sentResponse(sock, r.con, "403 Forbidden", "text/plain", "");
 		} else {
-			sentResponse(sock, "200 OK", "text/plain", "");
+			sentResponse(sock, r.con, "200 OK", "text/plain", "");
 		}
 	}
 }
@@ -403,22 +415,23 @@ void responseHead(int sock) {
  * Not Exists: 404.
  * @param sock Given socket to response to.
  */
-void responseDelete(int sock) {
+void responseDelete(int sock, struct streq r) {
 	struct stat s;
-	int exists = stat(req_path, &s);
+	int exists = stat(r.path, &s);
 	if (exists == -1) {
-		sentResponse(sock, "404 Not Found", "text/plain", "");
+		sentResponse(sock, r.con, "404 Not Found", "text/plain", "");
 	} else {
 		// Directory delete denied, show 403
 		if (S_ISDIR(s.st_mode)) {
-			sentResponse(sock, "403 Forbidden", "text/plain", "");
+			sentResponse(sock, r.con, "403 Forbidden", "text/plain", "");
 		} else {
 			// try to delete requested file
-			int status = remove(req_path);
+			int status = remove(r.path);
 			if (status == 0) {
-				sentResponse(sock, "200 OK", "text/plain", "File Deleted\n");
+				sentResponse(sock, r.con, "200 OK", "text/plain",
+						"File Deleted\n");
 			} else {
-				sentResponse(sock, "500 Internal Error", "text/plain",
+				sentResponse(sock, r.con, "500 Internal Error", "text/plain",
 						"Unable to delete the file\n");
 			}
 		}
