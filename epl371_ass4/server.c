@@ -63,9 +63,6 @@ int main(int argc, char *argv[]) {
 
 	//Accept and incoming connection
 	printf("Listening for connections to port %d\n", conf.port);
-
-	//c = sizeof(struct sockaddr_in);
-	//while ((newsock = accept(sock, (struct sockaddr *) &client, (socklen_t*) &c))) {
 	while (1) {
 
 		// Accept connection
@@ -101,9 +98,6 @@ int main(int argc, char *argv[]) {
 				perror("could not create thread");
 				exit(1);
 			}
-
-			//Now join the thread , so that we dont terminate before the thread
-			//pthread_join( sniffer_thread , NULL);
 			printf("Handler assigned\n");
 		}
 		}
